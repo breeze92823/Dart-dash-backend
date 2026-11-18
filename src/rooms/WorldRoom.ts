@@ -6,7 +6,7 @@ import { sanitizeProgress } from "../sanitize.js";
 import { accrue, rollWedge, spinStateFrom, type SpinState } from "../spin.js";
 import { claimDaily, dailyFields, dailyView, readDaily, rollDaily, type DailyState } from "../daily.js";
 import { applyAvatar, applyBase, applyEmote, applyLoadout, applyPose } from "../presence.js";
-import { isHosted, reportableId, reportScores, verifyGameToken, verifyRewardToken, type ScoreRow } from "../bloxity.js";
+import { isHosted, reportableId, reportScores, reportStats, statValues, verifyGameToken, verifyRewardToken, type ScoreRow, type StatRow } from "../bloxity.js";
 import { ranksOf, topBoards } from "../leaderboard.js";
 import { claimPlaytime, playtimeFields, playtimeView, readPlaytime, type PlaytimeState } from "../playtime.js";
 
@@ -38,6 +38,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   // sessionId -> last saved stats, and what was last reported to the Bloxity leaderboards per board.
   private stats = new Map<string, Record<string, number>>();
   private reported = new Map<string, Record<string, number>>();
+  private reportedStats = new Map<string, string>(); // sessionId -> the profile stats last reported (JSON)
   // sessionId -> placement -> time (ms) of the last accepted rewarded-ad claim.
   private adClaims = new Map<string, Record<string, number>>();
 
@@ -235,6 +236,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   // Changed best scores of this room's Bloxity accounts -> the hosted leaderboards.
   private async reportBoards() {
     const rows: ScoreRow[] = [];
+    const statRows: StatRow[] = [];
     for (const [sid, userId] of this.userIds) {
       const id = reportableId(userId);
       const stats = this.stats.get(sid);
@@ -248,8 +250,16 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         }
       }
       this.reported.set(sid, done);
+      // Profile stats: the current values, only when they changed since the last report.
+      const values = statValues(stats);
+      const key = JSON.stringify(values);
+      if (Object.keys(values).length && this.reportedStats.get(sid) !== key) {
+        statRows.push({ userId: id, values });
+        this.reportedStats.set(sid, key);
+      }
     }
     if (rows.length) await reportScores(rows);
+    if (statRows.length) await reportStats(statRows);
   }
 
   // The lowest base slot nobody in this room owns.
@@ -335,6 +345,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.inheritedPlaytime.delete(sessionId);
     this.verified.delete(sessionId);
     this.stats.delete(sessionId);
+    this.reportedStats.delete(sessionId);
     this.reported.delete(sessionId);
     this.adClaims.delete(sessionId);
   }

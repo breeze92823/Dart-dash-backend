@@ -89,7 +89,15 @@ export const TREADMILL_LEVEL_MAX = 8;
 export const GAME_SLUG_DEFAULT = "dart-dash";
 // Rewarded-ad placements the client may claim (the client's AD_REWARDS ids) and the least seconds
 // between two claims of the same placement in one session.
-export const AD_COOLDOWN_SECONDS: Record<string, number> = { "free-darts": 100, "cash-boost": 500, "luck-boost": 500 };
+export const AD_COOLDOWN_SECONDS: Record<string, number> = {
+  "free-darts": 100,
+  "free-pack": 500,
+  "cash-boost": 500,
+  "luck-boost": 500,
+  "free-skin": 250,
+  "free-aura": 250,
+  "free-trail": 250,
+};
 // Emote ids relayed to the others (Bloxity emote ids), longest accepted.
 export const EMOTE_ID_MAX = 64;
 // Hosted leaderboards (leaderboards: client LEADERBOARDS ids -> the saved doc field reported).
@@ -100,3 +108,12 @@ export const BLOXITY_BOARDS = [
 ] as const;
 export const REPORT_EVERY_MS = 30_000;
 export const REPORT_BATCH_MAX = 200;
+// Profile stats shown under "Only in this game" on the player's Boxity profile (POST /v1/games/{id}/stats).
+// `field` = the saved-progress number reported; `type` sets the formatting and the ceiling above which Boxity
+// rejects (never clamps) a value, so anything over it is left out.
+export const BLOXITY_STATS = [
+  { key: "captures", field: "captures", label: "Animals Caught", type: "number", sortOrder: 1 },
+  { key: "steps", field: "steps", label: "Treadmill Steps", type: "number", sortOrder: 2 },
+  { key: "earned", field: "earned", label: "Total Earned", type: "currency", sortOrder: 3 },
+] as const;
+export const STAT_CEILING: Record<string, number> = { number: 1_000_000_000, seconds: 31_536_000_000, currency: 1_000_000_000_000, percent: 100 };

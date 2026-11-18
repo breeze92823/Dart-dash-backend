@@ -48,6 +48,8 @@ describe("bases", () => {
       level: 5,
       tml: 2,
       steps: 1234.7,
+      money: 5e6,
+      captures: 42,
       aura: "flames",
     });
     a.send("pose", { x: 30, y: 0.4, z: -20, yaw: 1, speed: 5, tm: true, aim: false, carry: "bear:golden" });
@@ -56,6 +58,8 @@ describe("bases", () => {
     assert.strictEqual(pa.penLevel, 5);
     assert.strictEqual(pa.tml, 2);
     assert.strictEqual(pa.steps, 1234);
+    assert.strictEqual(pa.money, 5e6);
+    assert.strictEqual(pa.captures, 42);
     assert.strictEqual(pa.aura, "flames");
     assert.strictEqual(pa.tm, true);
     assert.strictEqual(pa.carry, "bear:golden");
@@ -91,5 +95,16 @@ describe("bases", () => {
     // The refusals answer at once; the accepted claim answers after Bloxity's check.
     assert.deepStrictEqual(answers.filter((m) => !m.ok).map((m) => m.reason).sort(), ["bad", "early"]);
     assert.strictEqual(answers.filter((m) => m.ok).length, 1);
+  });
+});
+
+describe("bloxity leaderboard ids", () => {
+  it("reports verified accounts as legion_<id> and never guests", async () => {
+    const { reportableId } = await import("../src/bloxity.js");
+    assert.strictEqual(reportableId("65a1b2c3d4"), "legion_65a1b2c3d4");
+    assert.strictEqual(reportableId("legion_65a1#m2"), "legion_65a1");
+    assert.strictEqual(reportableId("guest-ab12"), null);
+    assert.strictEqual(reportableId("dev-ab12"), null);
+    assert.strictEqual(reportableId("bad id!"), null);
   });
 });

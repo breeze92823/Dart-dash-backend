@@ -61,10 +61,12 @@ export async function verifyRewardToken(token: unknown): Promise<boolean> {
 }
 
 // --- Hosted leaderboards -----------------------------------------------------------------------
-// Scores are only reported for Bloxity accounts (`legion_` ids, any `#m...` mode suffix stripped).
+// The report identifies players as "legion_<Bloxity user id>" (any `#m...` mode suffix stripped).
+// Only verified Bloxity accounts are reported (hosted rooms never hold a client-stated id).
 export const reportableId = (userId: string): string | null => {
-  const id = userId.split("#")[0];
-  return /^legion_[A-Za-z0-9_-]{1,120}$/.test(id) ? id : null;
+  const raw = userId.split("#")[0];
+  const id = raw.startsWith("legion_") ? raw : `legion_${raw}`;
+  return /^legion_[A-Za-z0-9_-]{1,120}$/.test(id) && !/^legion_(guest|dev)-/.test(id) ? id : null;
 };
 
 export interface ScoreRow {

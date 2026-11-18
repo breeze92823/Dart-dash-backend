@@ -1,4 +1,4 @@
-import { AVATAR_MAX_LEN, BASE_ANIMALS_MAX, EMOTE_ID_MAX, ID_PATTERN, PEN_LEVEL_RELAY_MAX, POSE_BOUNDS, PRESENCE_PETS_MAX, PET_TIERS_MAX, COUNT_MAX, TREADMILL_LEVEL_MAX } from "./constants.js";
+import { AVATAR_MAX_LEN, BASE_ANIMALS_MAX, EMOTE_ID_MAX, ID_PATTERN, PEN_LEVEL_RELAY_MAX, POSE_BOUNDS, PRESENCE_PETS_MAX, PET_TIERS_MAX, COUNT_MAX, CURRENCY_MAX, TREADMILL_LEVEL_MAX } from "./constants.js";
 import type { PlayerState } from "./rooms/schema/WorldState.js";
 
 // Presence: what the other clients need to draw a player in the world (client remotePlayers.js).
@@ -31,7 +31,7 @@ export function applyPose(p: PlayerState, msg: unknown): void {
   }
 }
 
-// `base` { animals: [{ species, mutation }], level, tml, steps, trail, aura, weapon, world }: what the
+// `base` { animals: [{ species, mutation }], level, tml, steps, money, captures, trail, aura, weapon, world }: what the
 // others draw in this player's base (the active pen animals), on its signs and treadmill console,
 // plus the cosmetics worn. Animals travel as "species:mutation" joined by commas (mutation "_" =
 // none), at most BASE_ANIMALS_MAX.
@@ -52,6 +52,8 @@ export function applyBase(p: PlayerState, msg: unknown): void {
   if (finite(m.level)) p.penLevel = Math.min(PEN_LEVEL_RELAY_MAX, Math.max(1, Math.floor(m.level)));
   if (finite(m.tml)) p.tml = Math.min(TREADMILL_LEVEL_MAX, Math.max(-1, Math.floor(m.tml)));
   if (finite(m.steps)) p.steps = clamp(Math.floor(m.steps), 0, COUNT_MAX);
+  if (finite(m.money)) p.money = clamp(Math.floor(m.money), 0, CURRENCY_MAX);
+  if (finite(m.captures)) p.captures = clamp(Math.floor(m.captures), 0, COUNT_MAX);
   for (const key of ["trail", "aura", "weapon", "world"] as const) {
     const v = m[key];
     if (v === "" || isId(v)) p[key] = v as string;

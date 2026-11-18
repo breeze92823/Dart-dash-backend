@@ -3,10 +3,11 @@
 //    an id sent by the client when it runs hosted; no/invalid token = a guest.
 //  - verifyRewardToken: a rewarded ad was really watched (POST /v1/ads/reward/verify).
 //  - reportScores: hosted leaderboards (POST /v1/leaderboards/hosted/{gameId}/report).
+//  - reportStats: profile stats (POST /v1/games/{gameId}/stats).
 // Environment (Bloxity injects the hosted ones): BLOXITY_API_URL, BLOXITY_GAME_ID, BLOXITY_REPORT_TOKEN,
 // BLOXITY_GAME_SLUG (defaults to the client's slug). Nothing here throws: every call answers null/false
 // on failure, and with no BLOXITY_GAME_ID (local dev, tests) the integration is off.
-import { BLOXITY_BOARDS, GAME_SLUG_DEFAULT, REPORT_BATCH_MAX } from "./constants.js";
+import { BLOXITY_BOARDS, BLOXITY_STATS, GAME_SLUG_DEFAULT, REPORT_BATCH_MAX, STAT_CEILING } from "./constants.js";
 
 const API = () => (process.env.BLOXITY_API_URL || "https://api.bloxity.io").replace(/\/$/, "");
 const SLUG = () => process.env.BLOXITY_GAME_SLUG || GAME_SLUG_DEFAULT;
@@ -85,5 +86,35 @@ export async function reportScores(rows: ScoreRow[]): Promise<void> {
     const r = await post(`${API()}/v1/leaderboards/hosted/${encodeURIComponent(gameId)}/report`, { boards, scores }, token);
     if (!r) continue;
     console.info("[bloxity] leaderboard report", { status: r.status, ok: r.json?.ok, accepted: r.json?.accepted, dropped: r.json?.dropped, results: r.json?.results });
+  }
+}
+
+// --- Profile stats -----------------------------------------------------------------------------------
+export interface StatRow {
+  userId: string;
+  values: Record<string, number>;
+}
+
+// The reportable values of a saved-progress object: finite, >= 0 and under the type's ceiling (Boxity
+// rejects an over-ceiling value for good, so it is left out rather than sent).
+export function statValues(saved: Record<string, number>): Record<string, number> {
+  const values: Record<string, number> = {};
+  for (const s of BLOXITY_STATS) {
+    const n = Math.floor(Number(saved[s.field]));
+    if (Number.isFinite(n) && n >= 0 && n <= STAT_CEILING[s.type]) values[s.key] = n;
+  }
+  return values;
+}
+
+export async function reportStats(rows: StatRow[]): Promise<void> {
+  const gameId = process.env.BLOXITY_GAME_ID;
+  const token = process.env.BLOXITY_REPORT_TOKEN;
+  if (!gameId || !token || !rows.length) return; // local dev: nothing to do
+  const definitions = BLOXITY_STATS.map(({ key, label, type, sortOrder }) => ({ key, label, type, sortOrder }));
+  for (let i = 0; i < rows.length; i += REPORT_BATCH_MAX) {
+    const players = rows.slice(i, i + REPORT_BATCH_MAX);
+    const r = await post(`${API()}/v1/games/${encodeURIComponent(gameId)}/stats`, { definitions, players }, token);
+    if (!r) continue;
+    console.info("[bloxity] stats report", { status: r.status, ok: r.json?.ok, accepted: r.json?.accepted, dropped: r.json?.dropped });
   }
 }

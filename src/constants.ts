@@ -63,7 +63,7 @@ export const SPIN_WEDGES = [
   { id: "hugePet", weight: 0.1 },
 ] as const;
 
-// Leaderboards (leaderboard.ts; client hub leaderboards via bots.redrawBoards): the saved doc
+// Leaderboards (leaderboard.ts; client hub leaderboards via boards.redrawBoards): the saved doc
 // fields ranked (Money, Steps, Captures), rows per board and how often the lists are re-sent.
 export const LEADERBOARD_STATS = ["money", "steps", "captures"] as const;
 export type LeaderboardStat = (typeof LEADERBOARD_STATS)[number];

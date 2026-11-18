@@ -29,6 +29,8 @@ export const PlayerState = schema(
     penLevel: t.int16().default(1), // pen level (shown on the base's sign)
     tml: t.int8().default(-1), // treadmill level, -1 = locked
     steps: t.float64().default(0), // treadmill steps (the console screen on the treadmill)
+    money: t.float64().default(0), // $ right now (the hub leaderboards list the room's players live)
+    captures: t.float64().default(0), // animals captured
     tm: t.boolean().default(false), // running on the treadmill right now
     carry: t.string().default(""), // "species:mutation" while carrying an animal, "" = nothing
     aim: t.boolean().default(false), // in aim mode (blowpipe up)

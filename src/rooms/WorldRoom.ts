@@ -1,11 +1,12 @@
 import { Room, Client, CloseCode } from "colyseus";
 import { WorldState, PlayerState } from "./schema/WorldState.js";
-import { DISTANCE_MAX, GUEST_ID_PREFIX, LEADERBOARD_EVERY_MS, NAME_MAX, PFP_MAX_LEN, RECONNECT_SECONDS, ROOM_MAX_CLIENTS } from "../constants.js";
+import { AD_COOLDOWN_SECONDS, BLOXITY_BOARDS, DISTANCE_MAX, GUEST_ID_PREFIX, LEADERBOARD_EVERY_MS, NAME_MAX, PFP_MAX_LEN, RECONNECT_SECONDS, REPORT_EVERY_MS, ROOM_MAX_CLIENTS, ROOM_SIZE } from "../constants.js";
 import { getPlayers, type PlayerDoc } from "../db.js";
 import { sanitizeProgress } from "../sanitize.js";
 import { accrue, rollWedge, spinStateFrom, type SpinState } from "../spin.js";
 import { claimDaily, dailyFields, dailyView, readDaily, rollDaily, type DailyState } from "../daily.js";
-import { applyAvatar, applyLoadout, applyPose } from "../presence.js";
+import { applyAvatar, applyBase, applyEmote, applyLoadout, applyPose } from "../presence.js";
+import { isHosted, reportableId, reportScores, verifyGameToken, verifyRewardToken, type ScoreRow } from "../bloxity.js";
 import { ranksOf, topBoards } from "../leaderboard.js";
 import { claimPlaytime, playtimeFields, playtimeView, readPlaytime, type PlaytimeState } from "../playtime.js";
 
@@ -22,7 +23,7 @@ function sanitizePfp(raw: unknown): string {
  * saves each signed-in player's progress (MongoDB, see db.ts) -- the client keeps no save of its
  * own, so this is the only place progress lives. The game is client-authoritative: no gameplay
  * rules live here, saves are only bounded (sanitize.ts). Full rooms spill into a fresh one
- * automatically (maxClients).
+ * automatically (maxClients). One room = ROOM_SIZE (6) players, each owning one base (PlayerState.slot).
  */
 export class WorldRoom extends Room<{ state: WorldState }> {
   state = new WorldState();
@@ -31,6 +32,14 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   // sessionId -> user id (Bloxity id). Deliberately NOT part of WorldState: it only gates this
   // room's own Mongo reads/writes. Guests have no entry.
   userIds = new Map<string, string>();
+
+  // sessionId -> what Bloxity vouched for at join (verified token), see onAuth.
+  private verified = new Map<string, { id: string; name: string }>();
+  // sessionId -> last saved stats, and what was last reported to the Bloxity leaderboards per board.
+  private stats = new Map<string, Record<string, number>>();
+  private reported = new Map<string, Record<string, number>>();
+  // sessionId -> placement -> time (ms) of the last accepted rewarded-ad claim.
+  private adClaims = new Map<string, Record<string, number>>();
 
   // sessionIds that already got a progress/noProgress answer for their current identity.
   private identified = new Set<string>();
@@ -59,6 +68,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
 
       const userId = this.userIds.get(client.sessionId);
       if (!userId) return;
+      this.stats.set(client.sessionId, { captures: Number(patch.captures) || 0, steps: Number(patch.steps) || 0, earned: Number(patch.earned) || 0 });
       const players = getPlayers();
       if (!players) return; // Mongo unset/unreachable -- degrade silently
       try {
@@ -153,14 +163,51 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const p = this.state.players.get(client.sessionId);
       if (p) applyAvatar(p, msg);
     },
+    // The base (presence.ts applyBase): the active pen animals, pen / treadmill levels, worn cosmetics.
+    base: (client: Client, msg: unknown) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p) applyBase(p, msg);
+    },
+    // A Bloxity emote the player just played (`play_emote`), replayed on everyone's screen.
+    emote: (client: Client, msg: unknown) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p) applyEmote(p, msg);
+    },
+    // A rewarded ad was watched: { placement, token }. The token is verified with Bloxity (once-only,
+    // 5 min) and each placement has a cooldown; answers `adRewardResult` { ok, placement, reason? }
+    // and the client grants the reward only on ok.
+    adReward: async (client: Client, msg: { placement?: unknown; token?: unknown }) => {
+      const placement = typeof msg?.placement === "string" ? msg.placement : "";
+      const cooldown = AD_COOLDOWN_SECONDS[placement];
+      if (cooldown === undefined) return client.send("adRewardResult", { ok: false, placement, reason: "bad" });
+      const claims = this.adClaims.get(client.sessionId) ?? {};
+      const now = Date.now();
+      if (now - (claims[placement] ?? 0) < cooldown * 1000) return client.send("adRewardResult", { ok: false, placement, reason: "early" });
+      claims[placement] = now; // reserved while the check is in flight, so a double send can't claim twice
+      this.adClaims.set(client.sessionId, claims);
+      const ok = await verifyRewardToken(msg?.token);
+      if (!ok) claims[placement] = 0;
+      try {
+        client.send("adRewardResult", { ok, placement, reason: ok ? undefined : "invalid" });
+      } catch {
+        // Gone meanwhile.
+      }
+    },
     // Re-states identity after a login/logout that happens AFTER join (a guest who signs in
     // mid-session). The server answers with progress/noProgress for the new identity.
-    identify: (client: Client, msg: { username?: string; userId?: string; pfp?: string }) => {
+    identify: async (client: Client, msg: { username?: string; userId?: string; pfp?: string; token?: string }) => {
       const p = this.state.players.get(client.sessionId);
       if (!p) return;
       if (typeof msg?.username === "string") p.username = sanitizeName(msg.username);
       if (typeof msg?.pfp === "string") p.pfp = sanitizePfp(msg.pfp);
-      if (typeof msg?.userId === "string") this.setUserId(client, p, msg.userId);
+      if (typeof msg?.userId !== "string" && typeof msg?.token !== "string") return;
+      // Hosted: only Bloxity's word counts (the token's user), never the id the client states.
+      const who = await this.resolveIdentity(msg?.token, msg?.userId);
+      if (this.state.players.get(client.sessionId) !== p) return; // left meanwhile
+      if (who.name && !msg?.username) p.username = sanitizeName(who.name);
+      this.verified.set(client.sessionId, who);
+      p.uid = isHosted() ? who.id : "";
+      this.setUserId(client, p, who.id);
     },
   };
 
@@ -170,6 +217,52 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.clock.setInterval(() => {
       for (const c of this.clients) void this.sendLeaderboard(c);
     }, LEADERBOARD_EVERY_MS);
+    // Bloxity hosted leaderboards: report the signed-in players' changed scores in batches.
+    this.clock.setInterval(() => {
+      void this.reportBoards();
+    }, REPORT_EVERY_MS);
+  }
+
+  // Resolves who a connection is. With a token: Bloxity's verified user. Without: a guest when
+  // hosted; locally (no BLOXITY_GAME_ID) the stated `dev-` / guest id, as before.
+  private async resolveIdentity(token: unknown, stated: unknown): Promise<{ id: string; name: string }> {
+    const user = await verifyGameToken(token);
+    if (user) return user;
+    if (!isHosted() && typeof stated === "string") return { id: stated, name: "" };
+    return { id: "", name: "" };
+  }
+
+  // Changed best scores of this room's Bloxity accounts -> the hosted leaderboards.
+  private async reportBoards() {
+    const rows: ScoreRow[] = [];
+    for (const [sid, userId] of this.userIds) {
+      const id = reportableId(userId);
+      const stats = this.stats.get(sid);
+      if (!id || !stats) continue;
+      const done = this.reported.get(sid) ?? {};
+      for (const b of BLOXITY_BOARDS) {
+        const score = Math.floor(stats[b.stat] ?? 0);
+        if (score > 0 && score !== done[b.id]) {
+          rows.push({ board: b.id, userId: id, score });
+          done[b.id] = score;
+        }
+      }
+      this.reported.set(sid, done);
+    }
+    if (rows.length) await reportScores(rows);
+  }
+
+  // The lowest base slot nobody in this room owns.
+  private freeSlot(): number {
+    const used = new Set<number>();
+    this.state.players.forEach((q) => used.add(q.slot));
+    for (let i = 0; i < ROOM_SIZE; i++) if (!used.has(i)) return i;
+    return -1;
+  }
+
+  // Bloxity token check before the player is let in (a bad token is a guest, not a refusal).
+  async onAuth(_client: Client, options?: { token?: string; userId?: string }) {
+    return this.resolveIdentity(options?.token, options?.userId);
   }
 
   // `leaderboard` { boards: { rebirths|trophies|energy|playtime: [{ name, value }] }, ranks: { stat: n | null } }.
@@ -186,14 +279,18 @@ export class WorldRoom extends Room<{ state: WorldState }> {
 
   onJoin(client: Client, options?: { username?: string; userId?: string; pfp?: string; pose?: unknown; loadout?: unknown; avatar?: string }) {
     const p = new PlayerState();
-    p.username = sanitizeName(options?.username);
+    p.slot = this.freeSlot(); // this player's base
+    const who = (client.auth ?? { id: "", name: "" }) as { id: string; name: string };
+    this.verified.set(client.sessionId, who);
+    p.uid = isHosted() ? who.id : "";
+    p.username = sanitizeName(options?.username) || sanitizeName(who.name);
     p.pfp = sanitizePfp(options?.pfp);
     // Presence from the join options, so the others draw the newcomer right away.
     applyPose(p, options?.pose);
     applyLoadout(p, options?.loadout);
     applyAvatar(p, options);
     this.state.players.set(client.sessionId, p);
-    this.setUserId(client, p, typeof options?.userId === "string" ? options.userId : "");
+    this.setUserId(client, p, who.id);
   }
 
   // A deliberate `room.leave()` closes with CONSENTED -- drop the player at once. Anything
@@ -236,6 +333,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.spinStates.delete(sessionId);
     this.playtimes.delete(sessionId);
     this.inheritedPlaytime.delete(sessionId);
+    this.verified.delete(sessionId);
+    this.stats.delete(sessionId);
+    this.reported.delete(sessionId);
+    this.adClaims.delete(sessionId);
   }
 
   private async savePlaytimeFor(userId: string, s: PlaytimeState) {

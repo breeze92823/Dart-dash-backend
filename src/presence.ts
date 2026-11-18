@@ -1,4 +1,4 @@
-import { AVATAR_MAX_LEN, ID_PATTERN, POSE_BOUNDS, PRESENCE_PETS_MAX, PET_TIERS_MAX } from "./constants.js";
+import { AVATAR_MAX_LEN, BASE_ANIMALS_MAX, EMOTE_ID_MAX, ID_PATTERN, PEN_LEVEL_RELAY_MAX, POSE_BOUNDS, PRESENCE_PETS_MAX, PET_TIERS_MAX, COUNT_MAX, TREADMILL_LEVEL_MAX } from "./constants.js";
 import type { PlayerState } from "./rooms/schema/WorldState.js";
 
 // Presence: what the other clients need to draw a player in the world (client remotePlayers.js).
@@ -6,6 +6,7 @@ import type { PlayerState } from "./rooms/schema/WorldState.js";
 // client-authoritative and purely cosmetic.
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const hasControlChars = (v: string) => [...v].some((c) => c.charCodeAt(0) < 32);
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const isId = (v: unknown): v is string => typeof v === "string" && ID_PATTERN.test(v);
 
@@ -20,6 +21,49 @@ export function applyPose(p: PlayerState, msg: unknown): void {
   if (finite(m.z)) p.z = clamp(m.z, -b.z, b.xy);
   if (finite(m.yaw)) p.yaw = Math.atan2(Math.sin(m.yaw), Math.cos(m.yaw));
   if (finite(m.speed)) p.speed = clamp(m.speed, 0, b.speed);
+  if (typeof m.tm === "boolean") p.tm = m.tm;
+  if (typeof m.aim === "boolean") p.aim = m.aim;
+  // `carry` "species:mutation" (mutation "_" = none) or "" when not carrying.
+  if (m.carry === "" ) p.carry = "";
+  else if (typeof m.carry === "string") {
+    const [sp, mu, extra] = m.carry.split(":");
+    if (extra === undefined && isId(sp) && isId(mu ?? "_")) p.carry = `${sp}:${mu ?? "_"}`;
+  }
+}
+
+// `base` { animals: [{ species, mutation }], level, tml, steps, trail, aura, weapon, world }: what the
+// others draw in this player's base (the active pen animals), on its signs and treadmill console,
+// plus the cosmetics worn. Animals travel as "species:mutation" joined by commas (mutation "_" =
+// none), at most BASE_ANIMALS_MAX.
+export function applyBase(p: PlayerState, msg: unknown): void {
+  if (!msg || typeof msg !== "object") return;
+  const m = msg as Record<string, unknown>;
+  if (Array.isArray(m.animals)) {
+    const out: string[] = [];
+    for (const a of m.animals) {
+      if (out.length >= BASE_ANIMALS_MAX) break;
+      const sp = (a as { species?: unknown })?.species;
+      const mu = (a as { mutation?: unknown })?.mutation;
+      if (!isId(sp)) continue;
+      out.push(`${sp}:${isId(mu) ? mu : "_"}`);
+    }
+    p.base = out.join(",");
+  }
+  if (finite(m.level)) p.penLevel = Math.min(PEN_LEVEL_RELAY_MAX, Math.max(1, Math.floor(m.level)));
+  if (finite(m.tml)) p.tml = Math.min(TREADMILL_LEVEL_MAX, Math.max(-1, Math.floor(m.tml)));
+  if (finite(m.steps)) p.steps = clamp(Math.floor(m.steps), 0, COUNT_MAX);
+  for (const key of ["trail", "aura", "weapon", "world"] as const) {
+    const v = m[key];
+    if (v === "" || isId(v)) p[key] = v as string;
+  }
+}
+
+// `emote` { id }: a Bloxity emote id (free text from the portal, length-capped) the others replay.
+export function applyEmote(p: PlayerState, msg: unknown): void {
+  const id = (msg as { id?: unknown })?.id;
+  if (typeof id !== "string" || !id || id.length > EMOTE_ID_MAX || hasControlChars(id)) return;
+  p.emote = id;
+  p.emoteSeq = (p.emoteSeq + 1) % 30000;
 }
 
 // `loadout` { boat, engine, trail, partner, pets: [{ kind, tier }], world }: equipped catalog ids

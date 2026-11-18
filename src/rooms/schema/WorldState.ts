@@ -22,6 +22,20 @@ export const PlayerState = schema(
     pets: t.string().default(""), // equipped pets "kind:tier,kind:tier"
     world: t.string().default(""), // the world the player is in (client WORLDS id), "" = the start world
     avatar: t.string().default(""), // Bloxity look JSON { equipped, proportions, skin }, "" = default
+    // Bases (WorldRoom assigns `slot` on join; presence.ts applyBase / applyPose / applyEmote):
+    slot: t.int16().default(-1), // which of the ROOM_SIZE bases this player owns (server-assigned)
+    uid: t.string().default(""), // verified Bloxity user id ("" = guest), matches Legion.SDK.chat userId
+    base: t.string().default(""), // active pen animals "species:mutation,..." (mutation "_" = none)
+    penLevel: t.int16().default(1), // pen level (shown on the base's sign)
+    tml: t.int8().default(-1), // treadmill level, -1 = locked
+    steps: t.float64().default(0), // treadmill steps (the console screen on the treadmill)
+    tm: t.boolean().default(false), // running on the treadmill right now
+    carry: t.string().default(""), // "species:mutation" while carrying an animal, "" = nothing
+    aim: t.boolean().default(false), // in aim mode (blowpipe up)
+    aura: t.string().default(""), // equipped aura id
+    weapon: t.string().default(""), // equipped weapon id
+    emote: t.string().default(""), // last Bloxity emote id played
+    emoteSeq: t.int16().default(0), // bumps on every emote so a repeat re-plays
   },
   "PlayerState",
 );

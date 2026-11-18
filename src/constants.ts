@@ -1,5 +1,7 @@
-// Keep in step with the client's src/config.js by hand.
-export const ROOM_MAX_CLIENTS = 50;
+// Keep in step with the client's src/config.js (ROOM_SIZE) by hand. One room = six players, each
+// owning one of six bases (PlayerState.slot). deploy.yml sends this as the Bloxity `roomSize`.
+export const ROOM_MAX_CLIENTS = 6;
+export const ROOM_SIZE = ROOM_MAX_CLIENTS;
 
 // Longest accepted strings.
 export const NAME_MAX = 64;
@@ -75,3 +77,26 @@ export const ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 // The client's per-browser fallback id for players who are not signed in to Bloxity.
 // Guests are never persisted.
 export const GUEST_ID_PREFIX = "guest-";
+
+// --- Bases (presence.ts applyBase) ------------------------------------------------------------
+// The active pen animals relayed so everyone sees each base's zoo: at most the client's PEN.maxSlots.
+export const BASE_ANIMALS_MAX = 20;
+export const PEN_LEVEL_RELAY_MAX = 64;
+export const TREADMILL_LEVEL_MAX = 8;
+
+// --- Bloxity integration (bloxity.ts) ---------------------------------------------------------
+// Slug registered on bloxity.io (the client's GAME_SLUG); BLOXITY_GAME_SLUG overrides it.
+export const GAME_SLUG_DEFAULT = "dart-dash";
+// Rewarded-ad placements the client may claim (the client's AD_REWARDS ids) and the least seconds
+// between two claims of the same placement in one session.
+export const AD_COOLDOWN_SECONDS: Record<string, number> = { "free-darts": 100, "cash-boost": 500, "luck-boost": 500 };
+// Emote ids relayed to the others (Bloxity emote ids), longest accepted.
+export const EMOTE_ID_MAX = 64;
+// Hosted leaderboards (leaderboards: client LEADERBOARDS ids -> the saved doc field reported).
+export const BLOXITY_BOARDS = [
+  { id: "captures", stat: "captures", label: "Captures", order: "desc", mode: "best", format: "compact", reset: "none" },
+  { id: "steps", stat: "steps", label: "Treadmill steps", order: "desc", mode: "best", format: "compact", reset: "none" },
+  { id: "earned", stat: "earned", label: "Total earned", order: "desc", mode: "best", format: "compact", reset: "weekly" },
+] as const;
+export const REPORT_EVERY_MS = 30_000;
+export const REPORT_BATCH_MAX = 200;
